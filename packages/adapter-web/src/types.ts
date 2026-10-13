@@ -15,7 +15,7 @@ export type WebPlanData = Omit<PlanUpdateChunk, "type">;
 
 /**
  * Data parts the Web adapter streams for structured `StreamChunk`s, keyed by
- * the part name after `data-`. Use as `UIMessage`'s data-parts type argument.
+ * the part name after `data-`.
  */
 // biome-ignore lint/style/useConsistentTypeDefinitions: UIMessage constrains its data-parts type to Record<string, unknown>, which an interface doesn't satisfy without an index signature that would erase the part names.
 export type WebDataParts = {
