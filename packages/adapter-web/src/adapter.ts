@@ -30,6 +30,7 @@ import {
   NotImplementedError,
   parseMarkdown,
   type RawMessage,
+  type ReasoningChunk,
   type StreamChunk,
   type StreamOptions,
   type ThreadInfo,
@@ -306,23 +307,35 @@ export class WebAdapter implements Adapter<WebThreadIdData, UIMessage> {
     const ctx = requireWebRequestContext();
     const id = generateId();
     let fullText = "";
-    let openText: { id: string } | null = null;
+    // At most one text or reasoning part is open at a time, so parts keep
+    // the order the handler yielded them in.
+    let open: { id: string; kind: "text" | "reasoning" } | null = null;
     let nextTextPart = 0;
+    let nextReasoningPart = 0;
 
-    const openTextPart = (): { id: string } => {
-      // The first text part reuses the message id, so the returned id
-      // matches it.
-      const partId = nextTextPart === 0 ? id : `${id}-${nextTextPart}`;
-      nextTextPart++;
-      ctx.writer.write({ type: "text-start", id: partId });
-      openText = { id: partId };
-      return openText;
-    };
-    const closeText = () => {
-      if (openText) {
-        ctx.writer.write({ type: "text-end", id: openText.id });
-        openText = null;
+    const closePart = () => {
+      if (open) {
+        ctx.writer.write({ type: `${open.kind}-end`, id: open.id });
+        open = null;
       }
+    };
+    const openPart = (kind: "text" | "reasoning"): string => {
+      if (open?.kind === kind) {
+        return open.id;
+      }
+      closePart();
+      let partId: string;
+      if (kind === "text") {
+        // The first text part reuses the message id.
+        partId = nextTextPart === 0 ? id : `${id}-${nextTextPart}`;
+        nextTextPart++;
+      } else {
+        partId = `${id}-reasoning-${nextReasoningPart}`;
+        nextReasoningPart++;
+      }
+      ctx.writer.write({ type: `${kind}-start`, id: partId });
+      open = { id: partId, kind };
+      return partId;
     };
 
     try {
@@ -333,21 +346,32 @@ export class WebAdapter implements Adapter<WebThreadIdData, UIMessage> {
         if (typeof chunk === "string" || chunk.type === "markdown_text") {
           const text = typeof chunk === "string" ? chunk : chunk.text;
           if (text) {
-            const part = openText ?? openTextPart();
             fullText += text;
-            ctx.writer.write({ type: "text-delta", id: part.id, delta: text });
+            const partId = openPart("text");
+            ctx.writer.write({ type: "text-delta", id: partId, delta: text });
           }
           continue;
         }
-        closeText();
+        if (chunk.type === "reasoning") {
+          if (chunk.text) {
+            const partId = openPart("reasoning");
+            ctx.writer.write({
+              type: "reasoning-delta",
+              id: partId,
+              delta: chunk.text,
+            });
+          }
+          continue;
+        }
+        closePart();
         ctx.writer.write(streamChunkToDataPart(chunk, id));
       }
     } finally {
       // A stream that yields no text still produces one (empty) text part.
       if (nextTextPart === 0) {
-        openTextPart();
+        openPart("text");
       }
-      closeText();
+      closePart();
     }
     return {
       id,
@@ -489,7 +513,7 @@ function extractTextFromUIMessage(message: UIMessage): string {
 
 /** Map a structured chunk to the `data-*` part useChat stores on the message. */
 function streamChunkToDataPart(
-  chunk: Exclude<StreamChunk, MarkdownTextChunk>,
+  chunk: Exclude<StreamChunk, MarkdownTextChunk | ReasoningChunk>,
   messageId: string
 ): DataUIPart<WebDataParts> & { id: string } {
   // Each case destructures on its own: TypeScript doesn't narrow a rest

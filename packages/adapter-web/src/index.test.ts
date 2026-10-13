@@ -588,6 +588,74 @@ describe("WebAdapter — end-to-end handler dispatch", () => {
     ]);
   });
 
+  it("streams reasoning chunks as reasoning parts that close when text resumes", async () => {
+    const { chat } = buildChat({});
+    const captured: { id?: string; text?: string } = {};
+    chat.onDirectMessage(async (thread) => {
+      async function* gen(): AsyncGenerator<string | StreamChunk> {
+        yield { type: "reasoning", text: "Let me " };
+        yield { type: "reasoning", text: "think." };
+        yield "Answer";
+        yield { type: "reasoning", text: "Check a tool." };
+        yield {
+          type: "task_update",
+          id: "t1",
+          title: "Search",
+          status: "complete",
+        };
+        yield { type: "reasoning", text: "Done." };
+      }
+      const sent = await thread.post(gen());
+      captured.id = sent.id;
+      captured.text = sent.text;
+    });
+
+    const response = await chat.webhooks.web(
+      makeWebRequest({
+        id: "conv-reasoning",
+        messages: [makeUserMessage("trigger")],
+      })
+    );
+
+    const events = (await readSseEvents(response)) as Array<{
+      type: string;
+    }>;
+    const id = captured.id;
+    expect(
+      events.filter(
+        (e) =>
+          e.type.startsWith("text-") ||
+          e.type.startsWith("reasoning-") ||
+          e.type.startsWith("data-")
+      )
+    ).toEqual([
+      { type: "reasoning-start", id: `${id}-reasoning-0` },
+      { type: "reasoning-delta", id: `${id}-reasoning-0`, delta: "Let me " },
+      { type: "reasoning-delta", id: `${id}-reasoning-0`, delta: "think." },
+      { type: "reasoning-end", id: `${id}-reasoning-0` },
+      { type: "text-start", id },
+      { type: "text-delta", id, delta: "Answer" },
+      { type: "text-end", id },
+      { type: "reasoning-start", id: `${id}-reasoning-1` },
+      {
+        type: "reasoning-delta",
+        id: `${id}-reasoning-1`,
+        delta: "Check a tool.",
+      },
+      { type: "reasoning-end", id: `${id}-reasoning-1` },
+      {
+        type: "data-task",
+        id: "t1",
+        data: { id: "t1", title: "Search", status: "complete" },
+      },
+      { type: "reasoning-start", id: `${id}-reasoning-2` },
+      { type: "reasoning-delta", id: `${id}-reasoning-2`, delta: "Done." },
+      { type: "reasoning-end", id: `${id}-reasoning-2` },
+    ]);
+    // Reasoning stays out of the message text.
+    expect(captured.text).toBe("Answer");
+  });
+
   it("emits one empty text part for a stream with no text", async () => {
     const { chat } = buildChat({});
     chat.onDirectMessage(async (thread) => {

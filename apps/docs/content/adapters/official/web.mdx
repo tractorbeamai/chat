@@ -233,6 +233,24 @@ export default function ChatPage() {
 
 The Vue and Svelte `useChat` helpers take the same type argument.
 
+### Reasoning
+
+[`reasoning` chunks](/docs/streaming#reasoning) stream as AI SDK [reasoning parts](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot#reasoning), so the browser can show the model's reasoning while other adapters drop it. Consecutive `reasoning` chunks fill one part of type `reasoning`. Text, a task, or a plan chunk closes it, and reasoning yielded after that starts a new part. A `reasoning` chunk likewise closes the current text part. `message.parts` therefore keeps reasoning, text, tasks, and the plan in the order your handler yielded them.
+
+Render reasoning parts next to the text parts:
+
+```tsx title="app/chat/page.tsx"
+case "reasoning":
+  return (
+    <details key={`${message.id}-${index}`}>
+      <summary>Reasoning</summary>
+      {part.text}
+    </details>
+  );
+```
+
+Reasoning isn't part of the message text, so it isn't included in the `text` of the message `thread.post()` returns.
+
 ## Framework integrations
 
 The Web adapter speaks the AI SDK UI message stream protocol, so React, Vue, and Svelte AI SDK clients work against the same server endpoint. The framework subpaths expose `useChat` helpers preconfigured for that endpoint. The `api` and `threadId` options are the same in all three, and the server-side setup doesn't change.
