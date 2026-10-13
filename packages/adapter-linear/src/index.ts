@@ -1691,7 +1691,8 @@ export class LinearAdapter
   ): Promise<RawMessage<LinearRawMessage>> {
     await this.ensureValidToken();
     const client = this.getClient();
-    const { issueId, agentSessionId } = this.decodeThreadId(threadId);
+    const thread = this.decodeThreadId(threadId);
+    const { issueId, agentSessionId } = thread;
 
     if (agentSessionId) {
       throw new AdapterError(
@@ -1700,6 +1701,7 @@ export class LinearAdapter
       );
     }
 
+    await this.validateComment(thread, messageId);
     const body = renderMessageToLinearMarkdown(message, this.formatConverter);
 
     // Update the comment via Linear SDK
@@ -1749,7 +1751,8 @@ export class LinearAdapter
    * Uses LinearClient.deleteComment(id).
    */
   async deleteMessage(threadId: string, messageId: string): Promise<void> {
-    const { agentSessionId } = this.decodeThreadId(threadId);
+    const thread = this.decodeThreadId(threadId);
+    const { agentSessionId } = thread;
     if (agentSessionId) {
       throw new AdapterError(
         "Linear agent session activities are append-only and cannot be deleted",
@@ -1758,6 +1761,7 @@ export class LinearAdapter
     }
 
     await this.ensureValidToken();
+    await this.validateComment(thread, messageId);
     await this.getClient().deleteComment(messageId);
   }
 
@@ -1768,16 +1772,36 @@ export class LinearAdapter
    * Linear reactions use emoji strings (unicode).
    */
   async addReaction(
-    _threadId: string,
+    threadId: string,
     messageId: string,
     emoji: EmojiValue | string
   ): Promise<void> {
     await this.ensureValidToken();
+    await this.validateComment(this.decodeThreadId(threadId), messageId);
     const emojiStr = this.resolveEmoji(emoji);
     await this.getClient().createReaction({
       commentId: messageId,
       emoji: emojiStr,
     });
+  }
+
+  private async validateComment(
+    thread: LinearThreadId,
+    messageId: string
+  ): Promise<void> {
+    const comment = await this.getClient().comment({ id: messageId });
+    if (
+      !comment.issueId ||
+      comment.issueId !== thread.issueId ||
+      (thread.commentId &&
+        comment.id !== thread.commentId &&
+        comment.parentId !== thread.commentId)
+    ) {
+      throw new ValidationError(
+        "linear",
+        "Comment does not belong to this thread"
+      );
+    }
   }
 
   /**

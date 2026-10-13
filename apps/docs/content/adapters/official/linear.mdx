@@ -283,6 +283,10 @@ The previous `.client` getter still works as a deprecated alias for `.linearClie
 
 For agent-session threads, `fetchMessages()` throws a `ValidationError` if the session has no associated issue or its issue ID does not match the issue ID in the thread ID. The adapter checks this before fetching session comments or activities.
 
+## Comment mutations
+
+Comment edits, deletions, and reactions retrieve the target comment before writing. The adapter throws a `ValidationError` if the comment has no issue, belongs to another issue, or is outside the requested comment thread. The connection needs read access to verify ownership, in addition to the permissions required for the write.
+
 ## Thread IDs
 
 Linear has four thread variants:
