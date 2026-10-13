@@ -103,7 +103,10 @@ export function cardToBlockKit(card: CardElement): SlackBlock[] {
       type: "header",
       text: {
         type: "plain_text",
-        text: convertEmoji(card.title),
+        text: truncateSlackText(
+          convertEmoji(card.title),
+          HEADER_TEXT_MAX_CHARS
+        ),
         emoji: true,
       },
     });
@@ -213,7 +216,7 @@ export function convertTextToBlock(element: TextElement): SlackBlock {
     type: "section",
     text: {
       type: "mrkdwn",
-      text: formattedText,
+      text: truncateSlackText(formattedText, SECTION_TEXT_MAX_CHARS),
     },
   };
 }
@@ -271,7 +274,10 @@ function convertButtonToElement(button: ButtonElement): SlackButtonElement {
     type: "button",
     text: {
       type: "plain_text",
-      text: convertEmoji(button.label),
+      text: truncateSlackText(
+        convertEmoji(button.label),
+        BUTTON_TEXT_MAX_CHARS
+      ),
       emoji: true,
     },
     action_id: button.id,
@@ -300,7 +306,10 @@ function convertLinkButtonToElement(
     type: "button",
     text: {
       type: "plain_text",
-      text: convertEmoji(button.label),
+      text: truncateSlackText(
+        convertEmoji(button.label),
+        BUTTON_TEXT_MAX_CHARS
+      ),
       emoji: true,
     },
     action_id: button.id ?? `link-${button.url.slice(0, 200)}`,
@@ -387,8 +396,25 @@ function convertRadioSelectToElement(
   return element;
 }
 
+const ELLIPSIS = "…";
+const HEADER_TEXT_MAX_CHARS = 150;
+const BUTTON_TEXT_MAX_CHARS = 75;
 // Slack's section text object limit
 const SECTION_TEXT_MAX_CHARS = 3000;
+
+function truncateSlackText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  let end = maxLength - ELLIPSIS.length;
+  const boundary = text.charCodeAt(end - 1);
+  if (end > 0 && boundary >= 0xd800 && boundary <= 0xdbff) {
+    end -= 1;
+  }
+
+  return `${text.slice(0, end)}${ELLIPSIS}`;
+}
 
 /**
  * Wrap ASCII fallback content in a fenced code block inside a section,
