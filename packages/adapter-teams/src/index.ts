@@ -1138,7 +1138,14 @@ export class TeamsAdapter implements Adapter<TeamsThreadId, unknown> {
         return null;
       }
 
-      return await this.getUserByAadObjectId(userId, aadObjectId);
+      const tenantId = await this.chat
+        .getState()
+        .get<string>(`teams:tenantId:${userId}`);
+      return await this.getUserByAadObjectId(
+        userId,
+        aadObjectId,
+        tenantId ?? undefined
+      );
     } catch (error) {
       this.logger.warn("Failed to read cached aadObjectId from state", {
         userId,
@@ -1190,7 +1197,8 @@ export class TeamsAdapter implements Adapter<TeamsThreadId, unknown> {
 
   private async getUserByAadObjectId(
     userId: string,
-    aadObjectId: string
+    aadObjectId: string,
+    tenantId: string | undefined
   ): Promise<UserInfo | null> {
     const cacheKey = `teams:userInfo:${aadObjectId}`;
     const isBot = this.isBotUserId(userId);
@@ -1203,7 +1211,8 @@ export class TeamsAdapter implements Adapter<TeamsThreadId, unknown> {
     }
 
     try {
-      const graphUser = await this.app.graph.call(users.get, {
+      // Users of other tenants only exist in their own tenant's directory
+      const graphUser = await this.app.graphFor(tenantId).call(users.get, {
         "user-id": aadObjectId,
       });
 
