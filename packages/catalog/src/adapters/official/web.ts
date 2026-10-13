@@ -1,7 +1,6 @@
 import type { CatalogAdapter } from "../../types";
 
 export const web = {
-  beta: true,
   description:
     "Serve a browser chat UI from the same bot using the AI SDK useChat protocol \u2014 works out of the box with @ai-sdk/react and ai-elements.",
   env: {

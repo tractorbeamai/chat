@@ -13,7 +13,6 @@ import { adaptersSource } from "@/lib/geistdocs/adapters-source";
 import { MoreAdapters } from "../../../components/more-adapters";
 
 interface AdapterFrontmatter {
-  beta?: boolean;
   description: string;
   logo?: string;
   packageName: string;
@@ -92,7 +91,6 @@ const Page = async ({ params }: { params: Promise<PageParams> }) => {
           {markdownPath}
         </a>
         <AdapterHero
-          beta={data.beta}
           logo={data.logo}
           name={data.title}
           packageName={data.packageName}

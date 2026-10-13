@@ -19,7 +19,6 @@ export const metadata: Metadata = {
 };
 
 const adapters = listAdapters().map((adapter) => ({
-  beta: adapter.beta,
   description: adapter.description,
   group: adapter.group,
   icon: adapter.icon,
