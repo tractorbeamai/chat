@@ -1,6 +1,6 @@
 import { ValidationError } from "@chat-adapter/shared";
 import { createMemoryState } from "@chat-adapter/state-memory";
-import type { UIMessage } from "ai";
+import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { Chat, type StreamChunk } from "chat";
 import { describe, expect, it, vi } from "vitest";
 import { createWebAdapter, WebAdapter } from "./index";
@@ -506,24 +506,24 @@ describe("WebAdapter — end-to-end handler dispatch", () => {
     expect(seen).toEqual(["done"]);
   });
 
-  it("drops non-text StreamChunks (task_update / plan_update) silently", async () => {
+  it("streams task_update and plan_update chunks as data parts in order", async () => {
     const { chat } = buildChat({});
+    const captured: { id?: string } = {};
     chat.onDirectMessage(async (thread) => {
       async function* gen(): AsyncGenerator<string | StreamChunk> {
+        yield { type: "plan_update", title: "Research" };
         yield "before";
         yield {
           type: "task_update",
           id: "t1",
-          title: "tool call",
+          title: "Search docs",
           status: "in_progress",
+          details: "Querying the index",
         };
-        yield {
-          type: "plan_update",
-          title: "step 1",
-        };
-        yield "after";
+        yield { type: "markdown_text", text: "after" };
       }
-      await thread.post(gen());
+      const sent = await thread.post(gen());
+      captured.id = sent.id;
     });
 
     const response = await chat.webhooks.web(
@@ -536,13 +536,184 @@ describe("WebAdapter — end-to-end handler dispatch", () => {
 
     const events = (await readSseEvents(response)) as Array<{
       type: string;
-      delta?: string;
     }>;
-    const deltas = events
-      .filter((e) => e.type === "text-delta")
-      .map((e) => e.delta);
-    expect(deltas.join("")).toBe("beforeafter");
-    expect(deltas).toHaveLength(2);
+    const id = captured.id;
+    expect(
+      events.filter(
+        (e) => e.type.startsWith("text-") || e.type.startsWith("data-")
+      )
+    ).toEqual([
+      {
+        type: "data-plan",
+        id,
+        data: { title: "Research" },
+      },
+      { type: "text-start", id },
+      { type: "text-delta", id, delta: "before" },
+      { type: "text-end", id },
+      {
+        type: "data-task",
+        id: "t1",
+        data: {
+          id: "t1",
+          title: "Search docs",
+          status: "in_progress",
+          details: "Querying the index",
+        },
+      },
+      { type: "text-start", id: `${id}-1` },
+      { type: "text-delta", id: `${id}-1`, delta: "after" },
+      { type: "text-end", id: `${id}-1` },
+    ]);
+  });
+
+  it("returns raw parts matching the message useChat assembles", async () => {
+    const { chat } = buildChat({});
+    const captured: { raw?: UIMessage } = {};
+    chat.onDirectMessage(async (thread) => {
+      async function* gen(): AsyncGenerator<string | StreamChunk> {
+        yield "Searching. ";
+        yield {
+          type: "task_update",
+          id: "t1",
+          title: "Search",
+          status: "pending",
+        };
+        yield {
+          type: "task_update",
+          id: "t2",
+          title: "Rank",
+          status: "pending",
+        };
+        yield {
+          type: "task_update",
+          id: "t1",
+          title: "Search",
+          status: "complete",
+          output: "3 results",
+        };
+        yield "Done.";
+      }
+      const raw = await thread.adapter.stream?.(thread.id, gen());
+      captured.raw = raw?.raw as UIMessage;
+    });
+
+    const response = await chat.webhooks.web(
+      makeWebRequest({
+        id: "conv-raw",
+        messages: [makeUserMessage("trigger")],
+      })
+    );
+    const events = (await readSseEvents(response)) as UIMessageChunk[];
+
+    let clientMessage: UIMessage | undefined;
+    for await (const message of readUIMessageStream({
+      stream: new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          for (const event of events) {
+            controller.enqueue(event);
+          }
+          controller.close();
+        },
+      }),
+    })) {
+      clientMessage = message;
+    }
+
+    const expectedParts = [
+      { type: "text", text: "Searching. " },
+      {
+        type: "data-task",
+        id: "t1",
+        data: {
+          id: "t1",
+          title: "Search",
+          status: "complete",
+          output: "3 results",
+        },
+      },
+      {
+        type: "data-task",
+        id: "t2",
+        data: { id: "t2", title: "Rank", status: "pending" },
+      },
+      { type: "text", text: "Done." },
+    ];
+    expect(captured.raw?.parts).toEqual(expectedParts);
+    expect(
+      clientMessage?.parts
+        .filter((p) => p.type !== "step-start")
+        .map((p) => (p.type === "text" ? { type: p.type, text: p.text } : p))
+    ).toEqual(expectedParts);
+  });
+
+  it("stops emitting data parts when request.signal aborts", async () => {
+    const { chat } = buildChat({});
+    const ctrl = new AbortController();
+    chat.onDirectMessage(async (thread) => {
+      async function* gen(): AsyncGenerator<string | StreamChunk> {
+        yield "first";
+        yield {
+          type: "task_update",
+          id: "t1",
+          title: "Work",
+          status: "in_progress",
+        };
+        ctrl.abort();
+        yield {
+          type: "task_update",
+          id: "t1",
+          title: "Work",
+          status: "complete",
+        };
+        yield "second";
+      }
+      await thread.post(gen());
+    });
+
+    const response = await chat.webhooks.web(
+      makeWebRequest(
+        { id: "conv-abort-data", messages: [makeUserMessage("trigger")] },
+        ctrl.signal
+      )
+    );
+    const events = (await readSseEvents(response)) as Array<{
+      type: string;
+      delta?: string;
+      data?: { status?: string };
+    }>;
+    expect(
+      events.filter((e) => e.type === "data-task").map((e) => e.data?.status)
+    ).toEqual(["in_progress"]);
+    expect(
+      events.filter((e) => e.type === "text-delta").map((e) => e.delta)
+    ).toEqual(["first"]);
+    expect(events.filter((e) => e.type === "text-start")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "text-end")).toHaveLength(1);
+  });
+
+  it("emits one empty text part for a stream with no text", async () => {
+    const { chat } = buildChat({});
+    chat.onDirectMessage(async (thread) => {
+      const empty: AsyncIterable<string> = {
+        [Symbol.asyncIterator]: () => ({
+          next: () =>
+            Promise.resolve({ done: true as const, value: undefined }),
+        }),
+      };
+      await thread.post(empty);
+    });
+
+    const response = await chat.webhooks.web(
+      makeWebRequest({
+        id: "conv-empty",
+        messages: [makeUserMessage("trigger")],
+      })
+    );
+    const events = (await readSseEvents(response)) as Array<{ type: string }>;
+    expect(
+      events.filter((e) => e.type.startsWith("text-")).map((e) => e.type)
+    ).toEqual(["text-start", "text-end"]);
   });
 
   it("propagates handler errors as an error chunk", async () => {

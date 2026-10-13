@@ -170,6 +170,16 @@ bot.onDirectMessage(async (thread, message) => {
 The adapter honours `request.signal`, so the iterator is short-
 circuited as soon as the browser disconnects.
 
+`task_update` and `plan_update` chunks become `data-task` (id = task
+id) and `data-plan` (id = message id) UI message parts whose `data` is
+the chunk minus `type`. useChat replaces a data part with the same type
+and id in place, so repeated task updates mutate one part. A data
+chunk closes the open text part; later text opens a new one with id
+`{messageId}-{n}`, keeping `message.parts` in yield order. The returned
+`raw` mirrors the parts useChat assembles. `WebDataParts` and
+`WebUIMessage` (in `types.ts`) type the client side; keep them in sync
+with `streamChunkToDataPart` in `adapter.ts`.
+
 ## Format conversion
 
 `WebFormatConverter` (in `format-converter.ts`) maps mdast to plain

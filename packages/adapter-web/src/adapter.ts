@@ -26,16 +26,25 @@ import {
   type Logger,
   Message,
   NotImplementedError,
+  type PlanUpdateChunk,
   parseMarkdown,
   type RawMessage,
   type StreamChunk,
   type StreamOptions,
+  type TaskUpdateChunk,
   type ThreadInfo,
   type UserInfo,
 } from "chat";
 import { requireWebRequestContext, webRequestContext } from "./als";
 import { WebFormatConverter } from "./format-converter";
-import type { WebAdapterConfig, WebUser } from "./types";
+import type {
+  WebAdapterConfig,
+  WebDataParts,
+  WebPlanData,
+  WebTaskData,
+  WebUIMessage,
+  WebUser,
+} from "./types";
 
 /** Decoded thread id components for the Web adapter. */
 export interface WebThreadIdData {
@@ -295,6 +304,12 @@ export class WebAdapter implements Adapter<WebThreadIdData, UIMessage> {
    * response body — no edit loop, no rate limiting concerns. Honors the
    * inbound request's abort signal so `useChat`'s `stop()` short-circuits the
    * generator on the server side.
+   *
+   * `task_update` and `plan_update` chunks become `data-task` and `data-plan`
+   * parts (see {@link WebDataParts}). A structured chunk closes the open text
+   * part, so text yielded after it starts a new text part and the message's
+   * parts keep the order the handler yielded them in. The first text part's
+   * id is the returned message id.
    */
   async stream(
     threadId: string,
@@ -303,26 +318,76 @@ export class WebAdapter implements Adapter<WebThreadIdData, UIMessage> {
   ): Promise<RawMessage<UIMessage>> {
     const ctx = requireWebRequestContext();
     const id = generateId();
-    let fullText = "";
-    ctx.writer.write({ type: "text-start", id });
+    // Mirrors the parts useChat assembles on the client, so `raw` matches
+    // what the browser renders.
+    const parts: WebUIMessage["parts"] = [];
+    let openText: { type: "text"; text: string } | null = null;
+    let textPartCount = 0;
+
+    const appendText = (text: string) => {
+      const partId = textPartId(id, textPartCount);
+      if (!openText) {
+        ctx.writer.write({ type: "text-start", id: partId });
+        openText = { type: "text", text: "" };
+        parts.push(openText);
+      }
+      openText.text += text;
+      if (text) {
+        ctx.writer.write({ type: "text-delta", id: partId, delta: text });
+      }
+    };
+    const closeText = () => {
+      if (openText) {
+        ctx.writer.write({
+          type: "text-end",
+          id: textPartId(id, textPartCount),
+        });
+        openText = null;
+        textPartCount++;
+      }
+    };
+
     try {
       for await (const chunk of iterable) {
         if (ctx.signal.aborted) {
           break;
         }
-        const text = streamChunkToText(chunk);
-        if (text) {
-          fullText += text;
-          ctx.writer.write({ type: "text-delta", id, delta: text });
+        if (typeof chunk === "string" || chunk.type === "markdown_text") {
+          const text = typeof chunk === "string" ? chunk : chunk.text;
+          if (text) {
+            appendText(text);
+          }
+          continue;
+        }
+        const dataPart = streamChunkToDataPart(chunk, id);
+        if (!dataPart) {
+          continue;
+        }
+        closeText();
+        ctx.writer.write(dataPart);
+        // useChat replaces a data part with the same type and id in place
+        // instead of appending another one; do the same here.
+        const existing = parts.findIndex(
+          (p) => p.type === dataPart.type && "id" in p && p.id === dataPart.id
+        );
+        if (existing === -1) {
+          parts.push(dataPart);
+        } else {
+          parts[existing] = dataPart;
         }
       }
     } finally {
-      ctx.writer.write({ type: "text-end", id });
+      // A stream that yields no text still produces one (empty) text part,
+      // as it did before structured chunks were streamed.
+      if (textPartCount === 0 && !openText) {
+        appendText("");
+      }
+      closeText();
     }
     return {
       id,
       threadId,
-      raw: assistantUIMessageFromText(id, fullText),
+      raw: { id, role: "assistant", parts },
     };
   }
 
@@ -457,16 +522,40 @@ function extractTextFromUIMessage(message: UIMessage): string {
     .join("\n");
 }
 
-function streamChunkToText(chunk: string | StreamChunk): string {
-  if (typeof chunk === "string") {
-    return chunk;
+/**
+ * Id of the `index`th text part in a streamed message. The first text part
+ * reuses the message id, so the id `stream()` returns matches it.
+ */
+function textPartId(messageId: string, index: number): string {
+  return index === 0 ? messageId : `${messageId}-${index}`;
+}
+
+type WebDataChunk =
+  | { type: "data-task"; id: string; data: WebTaskData }
+  | { type: "data-plan"; id: string; data: WebPlanData };
+
+/**
+ * Map a structured chunk to the `data-*` part useChat stores on the message,
+ * or `null` for a chunk type the Web adapter doesn't render.
+ */
+function streamChunkToDataPart(
+  chunk: TaskUpdateChunk | PlanUpdateChunk,
+  messageId: string
+): WebDataChunk | null {
+  switch (chunk.type) {
+    case "task_update": {
+      const { type: _type, ...data } = chunk;
+      // Keyed by task id, so each update replaces that task's previous state.
+      return { type: "data-task", id: chunk.id, data };
+    }
+    case "plan_update": {
+      const { type: _type, ...data } = chunk;
+      // A streamed message has one plan, keyed by the message id.
+      return { type: "data-plan", id: messageId, data };
+    }
+    default:
+      return null;
   }
-  if (chunk.type === "markdown_text") {
-    return chunk.text;
-  }
-  // task_update / plan_update — no native v1 representation in UIMessage.
-  // Future: emit as data-* parts. For now ignored so the stream stays clean.
-  return "";
 }
 
 function adapterPostableToText(

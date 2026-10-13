@@ -167,7 +167,7 @@ When streamed content contains GFM tables, as LLM output often does, the SDK buf
 
 ## Structured streaming chunks
 
-For Slack native streams and Linear agent-session streams, you can yield `StreamChunk` objects alongside plain text for rich progress updates:
+For Slack native streams, Linear agent-session streams, and the Web adapter, you can yield `StreamChunk` objects alongside plain text for rich progress updates. The Web adapter sends them to `useChat` as [data parts](/adapters/official/web#task-and-plan-updates):
 
 ```typescript title="lib/bot.ts" lineNumbers
 import type { StreamChunk } from "chat";
