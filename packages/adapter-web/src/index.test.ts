@@ -1,6 +1,6 @@
 import { ValidationError } from "@chat-adapter/shared";
 import { createMemoryState } from "@chat-adapter/state-memory";
-import type { UIMessage } from "ai";
+import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { Chat, type StreamChunk } from "chat";
 import { describe, expect, it, vi } from "vitest";
 import { createWebAdapter, WebAdapter } from "./index";
@@ -654,6 +654,35 @@ describe("WebAdapter — end-to-end handler dispatch", () => {
     ]);
     // Reasoning stays out of the message text.
     expect(captured.text).toBe("Answer");
+
+    // The AI SDK client assembles the parts in the order they were yielded.
+    let message: UIMessage | undefined;
+    for await (const snapshot of readUIMessageStream({
+      stream: new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          for (const event of events) {
+            controller.enqueue(event as UIMessageChunk);
+          }
+          controller.close();
+        },
+      }),
+    })) {
+      message = snapshot;
+    }
+    expect(
+      message?.parts.flatMap((part) => {
+        if (part.type === "reasoning" || part.type === "text") {
+          return [{ type: part.type, text: part.text, state: part.state }];
+        }
+        return part.type === "data-task" ? [{ type: part.type }] : [];
+      })
+    ).toEqual([
+      { type: "reasoning", text: "Let me think.", state: "done" },
+      { type: "text", text: "Answer", state: "done" },
+      { type: "reasoning", text: "Check a tool.", state: "done" },
+      { type: "data-task" },
+      { type: "reasoning", text: "Done.", state: "done" },
+    ]);
   });
 
   it("emits one empty text part for a stream with no text", async () => {
