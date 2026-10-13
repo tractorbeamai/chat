@@ -9,23 +9,24 @@
 
 Web adapter for [Chat SDK](https://chat-sdk.dev). Lets a chat-sdk bot serve a browser chat UI alongside Slack, Teams, Discord, etc. — the same `bot.onDirectMessage(...)` handler fires for every platform.
 
-The adapter speaks the [AI SDK UI message stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol), so React, Vue, and Svelte AI SDK clients work against the same server endpoint.
+The adapter speaks the [AI SDK UI message stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) by default, so React, Vue, and Svelte AI SDK clients work against the server endpoint. Set `protocol: "ag-ui"` to speak [AG-UI](https://docs.ag-ui.com/concepts/events) instead, for [TanStack AI](#tanstack-ai) and other AG-UI clients. The server has no runtime dependency on either client SDK.
 
 Documentation: [chat-sdk.dev/adapters/official/web](https://chat-sdk.dev/adapters/official/web) · Guides: [vercel.com/kb/chat-sdk](https://vercel.com/kb/chat-sdk)
 
 ## Installation
 
 ```bash
-pnpm add @chat-adapter/web ai
+pnpm add @chat-adapter/web
 ```
 
-Then install the framework package that matches your UI:
+Then install the client packages that match your UI:
 
-| Framework | Package | Import from |
-|-----------|---------|-------------|
-| React / Next.js | `@ai-sdk/react` | `@chat-adapter/web/react` |
-| Vue / Nuxt | `@ai-sdk/vue` | `@chat-adapter/web/vue` |
-| Svelte / SvelteKit | `@ai-sdk/svelte` | `@chat-adapter/web/svelte` |
+| Client | Packages | Import from | `protocol` |
+|--------|----------|-------------|------------|
+| AI SDK + React / Next.js | `ai`, `@ai-sdk/react` | `@chat-adapter/web/react` | `"ai-sdk"` (default) |
+| AI SDK + Vue / Nuxt | `ai`, `@ai-sdk/vue` | `@chat-adapter/web/vue` | `"ai-sdk"` (default) |
+| AI SDK + Svelte / SvelteKit | `ai`, `@ai-sdk/svelte` | `@chat-adapter/web/svelte` | `"ai-sdk"` (default) |
+| TanStack AI | `@tanstack/ai-react` (or another TanStack AI framework package) | `@tanstack/ai-react` | `"ag-ui"` |
 
 ## Scaffold with the CLI
 
@@ -131,6 +132,34 @@ const chat = useChat({ api: "/api/chat" });
 {/each}
 ```
 
+#### TanStack AI
+
+Set `protocol: "ag-ui"` on the adapter, then point TanStack AI's `useChat` at the route with `fetchServerSentEvents`:
+
+```typescript
+createWebAdapter({
+  userName: "mybot",
+  getUser: (req) => ({ id: getUserIdFromCookie(req) }),
+  protocol: "ag-ui",
+});
+```
+
+```tsx
+// app/chat/page.tsx
+"use client";
+import { fetchServerSentEvents, useChat } from "@tanstack/ai-react";
+
+export default function ChatPage() {
+  const { messages, sendMessage, isLoading, stop } = useChat({
+    connection: fetchServerSentEvents("/api/chat"),
+    threadId: "support-1",
+  });
+  // Text parts carry their text in `part.content`.
+}
+```
+
+`threadId` becomes the conversation id in the chat-sdk thread id. Each `thread.post` call arrives as its own assistant message, and handler errors end the run with a `RUN_ERROR` event.
+
 ## Authentication
 
 `getUser` is the **security boundary** for the Web adapter. Unlike Slack/Teams where the platform signs every webhook, web requests come straight from a browser — you must identify the caller yourself. Returning `null` causes the adapter to respond with HTTP 401 and no handler runs.
@@ -182,7 +211,7 @@ By default, each `useChat` conversation maps to one chat-sdk thread:
 web:{user.id}:{conversationId}
 ```
 
-`conversationId` is the `id` field useChat sends in its request body. If your client supplies one (`useChat({ id: "support-chat" })`), it's reused across reloads; otherwise a fresh id is generated per request.
+`conversationId` is the `id` field AI SDK's useChat sends in its request body, or the `threadId` field with `protocol: "ag-ui"`. If your client supplies one (`useChat({ id: "support-chat" })`), it's reused across reloads; otherwise a fresh id is generated per request.
 
 `channel.messages` and `thread.messages` are equivalent on web — the channel id is the thread id. This avoids cross-conversation bleed when `persistMessageHistory` is enabled and the same user has multiple useChat conversations open.
 
@@ -207,7 +236,7 @@ adapter.decodeThreadId("web:u1:abc");
 
 ## Streaming
 
-`thread.post` accepts an `AsyncIterable<string | StreamChunk>` and pumps deltas straight onto the SSE response body — no edit loop, no rate limiting. Plays nicely with the AI SDK's `streamText`:
+`thread.post` accepts an `AsyncIterable<string | StreamChunk>` and pumps deltas straight onto the SSE response body — no edit loop, no rate limiting. Handlers can use any model library. For example, with the AI SDK's `streamText`:
 
 ```typescript
 import { streamText } from "ai";
@@ -223,7 +252,7 @@ bot.onDirectMessage(async (thread, message) => {
 });
 ```
 
-The adapter honors `request.signal`, so calling `stop()` from `useChat` short-circuits the iterator on the server. `task_update` and `plan_update` `StreamChunk`s have no native v1 representation in the UI message stream and are dropped silently.
+The adapter honors `request.signal`, so calling `stop()` from the client short-circuits the iterator on the server. `task_update` and `plan_update` `StreamChunk`s have no native v1 representation on the wire and are dropped silently.
 
 ## Message persistence
 
@@ -307,6 +336,7 @@ Unlike the React helper, Vue and Svelte return the `Chat` instance directly. Acc
 |--------|----------|-------------|
 | `userName` | Yes | Bot username. Required by chat-sdk for mention detection (`@username`) and seeds the bot identity for assistant messages. |
 | `getUser` | Yes | `(request: Request) => WebUser \| null \| Promise<WebUser \| null>`. Resolves the user from the inbound HTTP request. Returning `null` produces HTTP 401. |
+| `protocol` | No | `"ai-sdk"` (default) or `"ag-ui"`. Wire protocol for requests and streamed responses. Use `"ag-ui"` for TanStack AI and other AG-UI clients. |
 | `persistMessageHistory` | No | Persist incoming message history in the configured state adapter. Default: `true`. |
 | `threadIdFor` | No | Derive a chat-sdk thread id from the resolved user and the useChat conversation id. Default: `web:{user.id}:{conversationId}`. |
 | `logger` | No | Logger instance (defaults to `ConsoleLogger("info")`). |
@@ -321,7 +351,7 @@ Unlike the React helper, Vue and Svelte return the `Chat` instance directly. Acc
 | Edit message | No (every assistant turn is a fresh streamed response) |
 | Delete message | No |
 | File uploads | No (deferred to v2) |
-| Streaming | Native (SSE / UI message stream) |
+| Streaming | Native (SSE: AI SDK UI message stream or AG-UI) |
 | Scheduled messages | No |
 
 ### Rich content

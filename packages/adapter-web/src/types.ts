@@ -8,6 +8,36 @@ export interface WebUser {
   name?: string;
 }
 
+/**
+ * Wire protocol the adapter speaks with the browser.
+ *
+ * - `"ai-sdk"`: AI SDK UI message stream, for `useChat` from `@ai-sdk/react`,
+ *   `@ai-sdk/vue`, `@ai-sdk/svelte`, and the `@chat-adapter/web/*` helpers.
+ * - `"ag-ui"`: AG-UI events, for TanStack AI's `fetchServerSentEvents`
+ *   connection and other AG-UI clients.
+ */
+export type WebProtocolName = "ai-sdk" | "ag-ui";
+
+/** One part of a {@link WebMessage}. Text parts carry their text in `text`. */
+export interface WebMessagePart {
+  type: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Raw message type for the Web adapter, exposed as `message.raw`.
+ *
+ * Incoming user messages keep the parts the client sent, minus anything the
+ * protocol doesn't allow (tool parts are always dropped). With `"ai-sdk"`
+ * this matches the AI SDK `UIMessage` shape.
+ */
+export interface WebMessage {
+  id: string;
+  parts: WebMessagePart[];
+  role: "user" | "assistant" | "system";
+  [key: string]: unknown;
+}
+
 export interface WebAdapterConfig {
   /**
    * Resolve the user from the inbound HTTP request.
@@ -30,9 +60,16 @@ export interface WebAdapterConfig {
    */
   persistMessageHistory?: boolean;
   /**
-   * Derive a chat-sdk thread id from the resolved user and the useChat conversation id.
+   * Wire protocol for requests and streamed responses.
    *
-   * Default: `web:{user.id}:{conversationId}` — one thread per useChat conversation.
+   * Default: `"ai-sdk"`. Use `"ag-ui"` for TanStack AI and other AG-UI clients.
+   */
+  protocol?: WebProtocolName;
+  /**
+   * Derive a chat-sdk thread id from the resolved user and the client's conversation id
+   * (`id` with `"ai-sdk"`, `threadId` with `"ag-ui"`).
+   *
+   * Default: `web:{user.id}:{conversationId}` — one thread per client conversation.
    * Override to implement different threading semantics (e.g., one thread per user).
    */
   threadIdFor?: (args: { user: WebUser; conversationId: string }) => string;
