@@ -661,6 +661,12 @@ export class GitHubAdapter
     // Extract and store installation ID for multi-tenant mode
     const installationId = (payload as { installation?: { id: number } })
       .installation?.id;
+    if (
+      this.fixedInstallationId !== null &&
+      installationId !== this.fixedInstallationId
+    ) {
+      return new Response("Unknown installation", { status: 404 });
+    }
     if (installationId && this.isMultiTenant && payload.repository) {
       const repo = payload.repository;
       await this.storeInstallationId(

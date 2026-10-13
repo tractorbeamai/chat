@@ -555,6 +555,140 @@ describe("GitHubAdapter", () => {
   });
 
   describe("handleWebhook", () => {
+    describe.each([
+      "hmac",
+      "custom",
+    ] as const)("fixed installation with %s verification", (verification) => {
+      let fixed: GitHubAdapter;
+      let chat: ReturnType<typeof createMockChatInstance>;
+      let state: ReturnType<typeof createMockState>;
+
+      beforeEach(async () => {
+        fixed = new GitHubAdapter({
+          appId: "12345",
+          privateKey: "test-private-key",
+          installationId: 111,
+          botUserId: 777,
+          webhookSecret: WEBHOOK_SECRET,
+          webhookVerifier: verification === "custom" ? () => true : undefined,
+          logger: mockLogger,
+        });
+        state = createMockState();
+        chat = createMockChatInstance({ state });
+        await fixed.initialize(chat);
+      });
+
+      describe.each([
+        ["issue_comment", makeIssueCommentPayload],
+        ["pull_request_review_comment", makeReviewCommentPayload],
+      ] as const)("%s", (event, payload) => {
+        it("dispatches comments from the configured installation", async () => {
+          const body = JSON.stringify(payload({ installation: { id: 111 } }));
+          const response = await fixed.handleWebhook(
+            makeWebhookRequest(
+              body,
+              event,
+              verification === "hmac" ? signPayload(body) : undefined
+            )
+          );
+
+          expect(response.status).toBe(200);
+          expect(chat.processMessage).toHaveBeenCalledWith(
+            fixed,
+            expect.any(String),
+            expect.any(Object),
+            undefined
+          );
+        });
+
+        it.each([
+          ["foreign", { id: 999 }],
+          ["missing", undefined],
+          ["null", null],
+          ["empty", {}],
+          ["string", { id: "111" }],
+          ["fractional", { id: 111.5 }],
+        ])("rejects a %s installation before dispatch", async (_, installation) => {
+          const body = JSON.stringify({ ...payload(), installation });
+          const response = await fixed.handleWebhook(
+            makeWebhookRequest(
+              body,
+              event,
+              verification === "hmac" ? signPayload(body) : undefined
+            )
+          );
+
+          expect(response.status).toBe(404);
+          expect(await response.text()).toBe("Unknown installation");
+          expect(chat).not.toHaveDispatched("processMessage");
+          expect(state.set).not.toHaveBeenCalled();
+          expect(mockUsersGetAuthenticated).not.toHaveBeenCalled();
+          expect(mockAppsGetAuthenticated).not.toHaveBeenCalled();
+        });
+      });
+
+      it("acknowledges ping without dispatching", async () => {
+        const body = JSON.stringify({ zen: "test" });
+        const response = await fixed.handleWebhook(
+          makeWebhookRequest(body, "ping", signPayload(body))
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("pong");
+        expect(chat).not.toHaveDispatched("processMessage");
+      });
+
+      it("rejects unverified deliveries before checking the installation", async () => {
+        fixed = new GitHubAdapter({
+          appId: "12345",
+          privateKey: "test-private-key",
+          installationId: 111,
+          botUserId: 777,
+          webhookSecret: WEBHOOK_SECRET,
+          webhookVerifier: verification === "custom" ? () => false : undefined,
+          logger: mockLogger,
+        });
+        await fixed.initialize(chat);
+        const body = JSON.stringify(
+          makeIssueCommentPayload({ installation: { id: 999 } })
+        );
+        const response = await fixed.handleWebhook(
+          makeWebhookRequest(body, "issue_comment", "sha256=invalid")
+        );
+
+        expect(response.status).toBe(401);
+        expect(chat).not.toHaveDispatched("processMessage");
+      });
+    });
+
+    it("enforces the installation configured through environment variables", async () => {
+      vi.stubEnv("GITHUB_TOKEN", "");
+      vi.stubEnv("GITHUB_APP_ID", "12345");
+      vi.stubEnv("GITHUB_PRIVATE_KEY", "test-private-key");
+      vi.stubEnv("GITHUB_INSTALLATION_ID", "111");
+
+      try {
+        const fixed = new GitHubAdapter({
+          botUserId: 777,
+          webhookSecret: WEBHOOK_SECRET,
+          logger: mockLogger,
+        });
+        const chat = createMockChatInstance();
+        await fixed.initialize(chat);
+        const body = JSON.stringify(
+          makeIssueCommentPayload({ installation: { id: 999 } })
+        );
+        const response = await fixed.handleWebhook(
+          makeWebhookRequest(body, "issue_comment", signPayload(body))
+        );
+
+        expect(response.status).toBe(404);
+        expect(chat).not.toHaveDispatched("processMessage");
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
     it("should return 401 for missing signature", async () => {
       const body = JSON.stringify(makeIssueCommentPayload());
       const request = new Request("https://example.com/api/webhooks/github", {
