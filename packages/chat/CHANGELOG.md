@@ -1,5 +1,39 @@
 # chat
 
+## 4.42.0
+
+### Minor Changes
+
+- daaa0ac: Add `@chat-adapter/catalog`, a zero-dependency catalog of every adapter on chat-sdk.dev. It lists official, vendor-official, and community adapters with their npm package, maintainer, README, and capability support, plus the factory export, peer dependencies, and environment variables for official and vendor-official adapters. New helpers include `listAdapters()`, `getCatalogEntry()`, and `getFeatureSupport()`.
+  
+  The `chat/adapters` subpath is now deprecated. It re-exports the original API from `@chat-adapter/catalog`, so existing imports keep working. Its `ADAPTERS` keeps alphabetical key order, and its `CatalogAdapter` type accepts objects without the new `features` and `readme` fields. In `@chat-adapter/catalog`, `ADAPTERS` follows chat-sdk.dev listing order and `CatalogAdapter` requires both fields. `create-chat-sdk` reads adapter metadata from `@chat-adapter/catalog`.
+  
+  `getAdapter()` and `listEnvVars()` now return `undefined` and `[]` for inherited object keys such as `"toString"`, instead of returning `Object.prototype` members.
+- fd291b8: feat(teams): let a card carry a text input
+  
+  `TextInput`, which modals already use, is now also a `CardChild`, so a user can type a reply on the card instead of opening a dialog. Teams renders it as an Adaptive Card `Input.Text` with the same mapping the modal converter uses, and the `@chat-adapter/teams/cards` subpath emits the same element. Slack, Google Chat, Discord, GitHub, and Linear show its label as text. WhatsApp, Messenger, Twilio, and X omit it, so don't make an input the only content on a card that reaches them.
+  
+  `ActionEvent` gains `values?: Record<string, string>`, the card's own input values keyed by input ID. It has the same shape as `ModalSubmitEvent.values`. The Teams adapter fills it from the `Action.Submit` payload, and it is absent on platforms with no card inputs. A button's `callbackUrl` POST now carries `values` too, so a webhook-driven flow with no `onAction` handler still receives what was typed.
+  
+  An input is required unless `optional` is set, and Teams validates every input on the card before it lets a button through, so mark it `optional` unless the buttons beside it should be blocked until it is filled. That validation is client-side, so treat `values` as user input and validate it in the handler. A Teams button with `actionType: "modal"` now renders with `associatedInputs: "none"`, so it opens its dialog without waiting on the card's inputs and doesn't send them.
+  
+  Teams merges card inputs into the button's own submit data, so a card `TextInput` with the ID `actionId`, `value`, or `msteams` throws a `ValidationError` when the card is rendered, and the `@chat-adapter/teams/cards` subpath throws an `Error`. Modal inputs can still use `actionId` and `value`.
+  
+  `CardChild` gained a member, so an adapter outside this repo that exhausts the union with a `never` check needs a `text_input` case. Every in-repo converter reaches it through a `default:` branch instead, so none needed changing.
+- 19c7aa2: Add a handler-only `onNewMessage(handler)` overload for messages that reach pattern routing, including attachment-only messages without text. Invalid `onNewMessage` arguments now throw a `ChatError` at registration.
+- 7b7d73c: Add a `visibleTo` option to `Button` and `LinkButton` that lists the user IDs allowed to see the button. The Slack adapter renders it as `visible_to_user_ids`. Other adapters ignore it and show the button to everyone. It only hides the button, so action handlers still need to check who clicked.
+- f8527b2: Add an optional `aiGenerated` field to `PostableRaw`, `PostableMarkdown`, `PostableAst`, `PostableCard`, `StreamingPlanOptions`, and `StreamOptions`. When it's `true`, adapters with a native AI label show it. The Teams adapter shows Teams' "AI generated" label on new, edited, channel, targeted, and streamed messages. An edit must set the flag again to keep the label. The built-in AI tools now set `aiGenerated: true` on the `markdown` and `raw` messages they post or edit.
+- f635dbe: Add a Twitch adapter. It reads channel chat through EventSub webhooks, replies with the Helix Chat API as a bot account, deletes messages as a moderator, and sends and receives whispers. The `chat/adapters` catalog and `create-chat-sdk` now include Twitch.
+
+### Patch Changes
+
+- 2f1cfa2: Allow `SlackAdapter` and `TelegramAdapter` to be assigned to `Adapter` when `exactOptionalPropertyTypes` is enabled.
+- 19c7aa2: Fix `onNewMessage` patterns with the global or sticky flag so they match on every message instead of skipping alternate ones.
+- 80e7bae: Stop describing the ioredis state adapter as supporting Redis Cluster. Its `client` option accepts an ioredis `Redis` instance, which a `Cluster` doesn't satisfy; Sentinel is still supported.
+- 8178fdb: Fix Workflow DevKit workflows failing to start with `ReferenceError: AbortController is not defined`. The default thread signal is now created on first use, and threads revived inside the workflow VM get an inert signal that never aborts.
+- Updated dependencies [daaa0ac]
+  - @chat-adapter/catalog@4.42.0
+
 ## 4.41.1
 
 ### Patch Changes

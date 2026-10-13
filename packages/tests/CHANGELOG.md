@@ -1,5 +1,11 @@
 # @chat-adapter/tests
 
+## 4.42.0
+
+### Minor Changes
+
+- 403b6ea: Support Vitest 5. The custom matchers now augment Vitest's `Matchers<R, T>` interface, and the `vitest` peer dependency is now `^5.0.0`. Projects that use `@chat-adapter/tests` must upgrade to Vitest 5.
+
 ## 4.41.1
 
 ## 4.41.0
