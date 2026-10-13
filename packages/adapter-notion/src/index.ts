@@ -794,6 +794,7 @@ export class NotionAdapter
     message: AdapterPostableMessage
   ): Promise<RawMessage<NotionRawMessage>> {
     const decoded = this.decodeThreadId(threadId);
+    const id = await this.validateComment(decoded, messageId);
     // PATCH comments may not accept attachments — link files in markdown only.
     const { markdown, linkOverflow } = await this.renderOutbound(message, {
       attachNative: false,
@@ -802,10 +803,10 @@ export class NotionAdapter
     if (linkOverflow.length > 0) {
       bodyMarkdown = `${bodyMarkdown}\n\n${linkOverflow.join("\n")}`.trim();
     }
-    const comment = await this.apiFetch<NotionComment>(
-      `/comments/${messageId}`,
-      { method: "PATCH", body: { markdown: bodyMarkdown } }
-    );
+    const comment = await this.apiFetch<NotionComment>(`/comments/${id}`, {
+      method: "PATCH",
+      body: { markdown: bodyMarkdown },
+    });
     return {
       id: comment.id,
       threadId,
@@ -813,8 +814,48 @@ export class NotionAdapter
     };
   }
 
-  async deleteMessage(_threadId: string, messageId: string): Promise<void> {
-    await this.apiFetch(`/comments/${messageId}`, { method: "DELETE" });
+  async deleteMessage(threadId: string, messageId: string): Promise<void> {
+    const id = await this.validateComment(
+      this.decodeThreadId(threadId),
+      messageId
+    );
+    await this.apiFetch(`/comments/${id}`, { method: "DELETE" });
+  }
+
+  private async validateComment(
+    thread: NotionThreadId,
+    messageId: string
+  ): Promise<string> {
+    const id = normalizeUuid(messageId, "messageId");
+    const comment = await this.retrieveComment(id);
+    if (
+      !comment ||
+      (thread.discussionId &&
+        normalizeUuid(comment.discussion_id, "discussionId") !==
+          thread.discussionId) ||
+      (thread.blockId &&
+        (comment.parent.type !== "block_id" ||
+          normalizeUuid(comment.parent.block_id, "blockId") !== thread.blockId))
+    ) {
+      throw new ValidationError(
+        "notion",
+        "Comment does not belong to this thread"
+      );
+    }
+    const pageId =
+      comment.parent.type === "page_id"
+        ? normalizeUuid(comment.parent.page_id, "pageId")
+        : await this.resolveBlockPageId(
+            normalizeUuid(comment.parent.block_id, "blockId"),
+            false
+          );
+    if (pageId !== thread.pageId) {
+      throw new ValidationError(
+        "notion",
+        "Comment does not belong to this thread"
+      );
+    }
+    return id;
   }
 
   async stream(
@@ -1088,15 +1129,18 @@ export class NotionAdapter
     return this.resolveBlockPageId(blockId);
   }
 
-  protected async resolveBlockPageId(blockId: string): Promise<string> {
-    const cached = this.blockPageCache.get(blockId);
+  protected async resolveBlockPageId(
+    blockId: string,
+    cache = true
+  ): Promise<string> {
+    const cached = cache ? this.blockPageCache.get(blockId) : undefined;
     if (cached) {
       return cached;
     }
 
     const state = this.chat?.getState();
     const stateKey = `notion:block-page:${blockId}`;
-    if (state) {
+    if (cache && state) {
       const fromState = await state.get(stateKey);
       if (typeof fromState === "string") {
         this.blockPageCache.set(blockId, fromState);
@@ -1120,10 +1164,12 @@ export class NotionAdapter
       if (block.parent.type === "page_id" && block.parent.page_id) {
         const pageId = normalizeUuid(block.parent.page_id, "pageId");
         // Cache every intermediate blockId → pageId once the page is found.
-        for (const visitedId of visited) {
-          this.blockPageCache.set(visitedId, pageId);
-          if (state) {
-            await state.set(`notion:block-page:${visitedId}`, pageId);
+        if (cache) {
+          for (const visitedId of visited) {
+            this.blockPageCache.set(visitedId, pageId);
+            if (state) {
+              await state.set(`notion:block-page:${visitedId}`, pageId);
+            }
           }
         }
         return pageId;
@@ -1131,7 +1177,9 @@ export class NotionAdapter
       if (block.parent.type === "block_id" && block.parent.block_id) {
         currentId = normalizeUuid(block.parent.block_id, "blockId");
         visited.push(currentId);
-        const cachedParent = this.blockPageCache.get(currentId);
+        const cachedParent = cache
+          ? this.blockPageCache.get(currentId)
+          : undefined;
         if (cachedParent) {
           for (const visitedId of visited) {
             this.blockPageCache.set(visitedId, cachedParent);

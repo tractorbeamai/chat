@@ -63,7 +63,7 @@ The adapter targets a single workspace through an [access-token connection](http
 ### 2. Set capabilities
 
 1. Under **Capabilities** then **Comment capabilities**, enable **Read comments** and **Insert comments**.
-2. Under **Capabilities** then **Content capabilities**, leave **Read content**, **Update content**, and **Insert content** as they are. **Read content** is required for [`message.subject`](/docs/subject) page metadata.
+2. Under **Capabilities** then **Content capabilities**, leave **Read content**, **Update content**, and **Insert content** as they are. **Read content** is required for [`message.subject`](/docs/subject) page metadata and for verifying the containing page before editing or deleting block-parent comments.
 3. Under **Capabilities** then **User capabilities**, leave **Read user information including email addresses** as it is. The adapter uses it for author names and mention resolution.
 
 ### 3. Choose content access
@@ -285,6 +285,8 @@ One Notion page is one Chat SDK channel, and each discussion is a thread.
 | Whole-block discussion (outbound) | `notion:{pageId}:block:{blockId}`, from `encodeThreadId({ pageId, blockId })` or the adapter helper | Starts a discussion on an entire block via `parent.block_id`. |
 
 Inbound `comment.created` events always include a `discussion_id`. The adapter resolves the containing page, including for block-parent comments, and dispatches on `notion:{pageId}:{discussionId}` so replies stay threaded.
+
+Comment edits and deletions require **Read comments** to retrieve the target before writing. The adapter throws a `ValidationError` if the comment is missing or belongs to another page, discussion, or block than the supplied thread ID. For block-parent comments, it retrieves the current block ancestry rather than relying on cached page ownership.
 
 <Callout type="warn">
 You can start page-level and whole-block discussions through the API. You cannot start selected-text-range (inline highlight) discussions through the public Comments API; those must already exist in Notion.
