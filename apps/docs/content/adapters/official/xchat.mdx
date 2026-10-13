@@ -9,6 +9,14 @@ tagline: Hold encrypted 1:1 and group conversations on XChat, with all cryptogra
 beta: true
 ---
 
+## Create a new bot
+
+Scaffold a Next.js bot with the XChat adapter using [`create-chat-sdk`](/docs/create-chat-sdk):
+
+<CreateChatSdk adapters="xchat memory" />
+
+The generated app uses the [Memory state adapter](/adapters/official/memory) for local development. To add the adapter to an existing app, start at [Install](#install).
+
 ## Install
 
 <PackageInstall package="@chat-adapter/x @chat-adapter/state-memory" />

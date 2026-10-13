@@ -9,6 +9,14 @@ tagline: Join Notion page and block comment discussions through webhooks and the
 beta: true
 ---
 
+## Create a new bot
+
+Scaffold a Next.js bot with the Notion adapter using [`create-chat-sdk`](/docs/create-chat-sdk):
+
+<CreateChatSdk adapters="notion memory" />
+
+The generated app uses the [Memory state adapter](/adapters/official/memory) for local development. To add the adapter to an existing app, start at [Install](#install).
+
 ## Install
 
 <PackageInstall package="@chat-adapter/notion" />
@@ -93,6 +101,15 @@ const notion = createNotionAdapter({
   in Notion and retain `NOTION_VERIFICATION_TOKEN` for native HMAC verification.
   `NOTION_TOKEN` is not needed when using `connectNotionAdapter`.
 </Callout>
+
+Create the connector and attach it to your project with the [Vercel CLI](https://vercel.com/docs/cli/connect). Notion webhooks go directly to your app, so omit `--triggers`. `vercel env pull` downloads a development OIDC token for local runs:
+
+```bash
+vercel link
+vercel connect create notion --name acme-notion
+vercel connect attach notion/acme-notion
+vercel env pull
+```
 
 ### Access token
 

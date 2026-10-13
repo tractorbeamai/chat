@@ -9,6 +9,14 @@ tagline: Integrate with Google Chat spaces for team collaboration and automated 
 beta: true
 ---
 
+## Create a new bot
+
+Scaffold a Next.js bot with the Google Chat adapter using [`create-chat-sdk`](/docs/create-chat-sdk):
+
+<CreateChatSdk adapters="gchat memory" />
+
+The generated app uses the [Memory state adapter](/adapters/official/memory) for local development. To add the adapter to an existing app, start at [Install](#install).
+
 ## Install
 
 <PackageInstall package="@chat-adapter/gchat @chat-adapter/state-memory" />

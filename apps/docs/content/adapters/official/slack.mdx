@@ -9,6 +9,14 @@ tagline: Build bots for Slack workspaces with full support for threads, reaction
 beta: true
 ---
 
+## Create a new bot
+
+Scaffold a Next.js bot with the Slack adapter using [`create-chat-sdk`](/docs/create-chat-sdk):
+
+<CreateChatSdk adapters="slack memory" />
+
+The generated app uses the [Memory state adapter](/adapters/official/memory) for local development. To add the adapter to an existing app, start at [Install](#install).
+
 ## Install
 
 <PackageInstall package="@chat-adapter/slack @chat-adapter/state-memory" />
@@ -136,6 +144,17 @@ createSlackAdapter({
 ```
 
 This is equivalent to passing a `botToken` resolver that calls `getToken` and a `webhookVerifier` that validates the Vercel OIDC token Connect attaches. Omit `signingSecret` / `SLACK_SIGNING_SECRET` when using it.
+
+Create the connector and attach it to your project with the [Vercel CLI](https://vercel.com/docs/cli/connect). `--trigger-path` registers the Slack webhook route as the trigger destination, and `vercel env pull` downloads a development OIDC token for local runs:
+
+```bash
+vercel link
+vercel connect create slack --name acme-slack --triggers
+vercel connect attach slack/acme-slack --triggers --trigger-path /api/webhooks/slack
+vercel env pull
+```
+
+Without `--trigger-branch`, Connect forwards webhooks to your production deployment. See [Vercel Connect](/docs/vercel-connect#set-up-a-connector) for the full setup.
 
 ### Single-workspace mode
 

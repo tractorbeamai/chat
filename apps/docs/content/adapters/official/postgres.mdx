@@ -9,6 +9,14 @@ tagline: Production state adapter for Chat SDK built on `pg` (node-postgres). Us
 beta: true
 ---
 
+## Create a new bot
+
+Scaffold a Next.js bot that stores state in PostgreSQL with [`create-chat-sdk`](/docs/create-chat-sdk). Replace `slack` with your platform adapter:
+
+<CreateChatSdk adapters="slack postgres" />
+
+The CLI adds `@chat-adapter/state-pg`, wires `createPostgresState()` into `src/lib/bot.ts`, and lists `POSTGRES_URL` in `.env.example`. To add the adapter to an existing app, start at [Install](#install).
+
 ## Install
 
 <PackageInstall package="@chat-adapter/state-pg" />
@@ -29,6 +37,31 @@ const bot = new Chat({
 ```
 
 By default, the adapter creates its tables and indexes on `connect()` if they don't already exist.
+
+## Vercel Marketplace
+
+Postgres providers such as Neon and Supabase are available on the [Vercel Marketplace](https://vercel.com/marketplace/category/storage). From your project directory, link the project and add an integration with the Vercel CLI. `vercel integration add` creates the database, connects it to the linked project, adds its credentials as environment variables, and pulls them into your local env file.
+
+<CodeBlockTabs defaultValue="neon">
+  <CodeBlockTabsList>
+    <CodeBlockTabsTrigger value="neon">Neon</CodeBlockTabsTrigger>
+    <CodeBlockTabsTrigger value="supabase">Supabase</CodeBlockTabsTrigger>
+  </CodeBlockTabsList>
+  <CodeBlockTab value="neon">
+```bash
+vercel link
+vercel integration add neon
+```
+  </CodeBlockTab>
+  <CodeBlockTab value="supabase">
+```bash
+vercel link
+vercel integration add supabase
+```
+  </CodeBlockTab>
+</CodeBlockTabs>
+
+`createPostgresState()` reads `POSTGRES_URL`, then falls back to `DATABASE_URL`. Run `vercel env ls` to see the variable names the integration added. If it stores the connection URL under another name, pass that variable as `url`.
 
 ## Configuration
 
