@@ -140,6 +140,13 @@ The route handles two kinds of request from Meta:
 - GET verification handshake: Meta sends a `hub.verify_token` challenge that must match `WHATSAPP_VERIFY_TOKEN`.
 - POST event delivery: incoming messages, reactions, and interactive responses, signed with `X-Hub-Signature-256` and verified against `WHATSAPP_APP_SECRET`.
 
+## Message formatting
+
+Pass `{ markdown: text }` to convert standard Markdown to WhatsApp formatting:
+`**bold**` becomes `*bold*`, `_italic_` stays `_italic_`, and `~~strike~~` becomes
+`~strike~`. Literal text such as `(~80 % easy)` is sent without additional
+Markdown escapes. Code content and intentional backslashes are preserved.
+
 ## Interactive messages
 
 The adapter converts card elements to WhatsApp interactive messages:
