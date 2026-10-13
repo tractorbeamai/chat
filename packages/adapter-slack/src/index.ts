@@ -305,6 +305,7 @@ import type {
   SlackFeedbackButtonsOptions,
   SlackInstallation,
   SlackSessionTitle,
+  SlackStreamResult,
   SlackSuggestedPrompts,
   SlackSuggestedPromptsContext,
 } from "./types";
@@ -439,6 +440,7 @@ export type {
   SlackInstallation,
   SlackSessionTitle,
   SlackSessionTitleContext,
+  SlackStreamResult,
   SlackSuggestedPrompt,
   SlackSuggestedPrompts,
   SlackSuggestedPromptsContext,
@@ -5924,7 +5926,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
    * Slack expires a native stream after roughly five minutes, so a reply
    * that streams longer than `streamSegmentMaxAgeMs` is finalized and
    * continued in a new message. The returned `id` is the last message of
-   * the reply; earlier segments are already final and are not tracked.
+   * the reply, and `messageIds` lists every message of the reply in order.
    *
    * Falls back to post-and-edit when the thread lacks native stream context.
    */
@@ -5932,7 +5934,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     threadId: string,
     textStream: AsyncIterable<string | StreamChunk>,
     options?: StreamOptions
-  ): Promise<RawMessage<unknown> | null> {
+  ): Promise<SlackStreamResult | null> {
     const { channel, threadTs: rawThreadTs } = this.decodeThreadId(threadId);
     const threadTs = rawThreadTs || undefined;
     if (!threadTs) {
@@ -6007,6 +6009,24 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
       tableHeader: "",
     };
     let rotations = 0;
+    /** Message IDs of the segments finalized so far, in order. */
+    const finalizedMessageIds: string[] = [];
+    /**
+     * Record the current segment's message before a new segment replaces it.
+     * A segment that expired before Slack accepted any call has no message.
+     */
+    const finalizeSegmentMessage = (): void => {
+      if (segment.streamer.ts) {
+        finalizedMessageIds.push(segment.streamer.ts);
+      }
+    };
+    const toStreamResult = (
+      message: RawMessage<unknown> | null
+    ): SlackStreamResult | null =>
+      message && {
+        ...message,
+        messageIds: [...finalizedMessageIds, message.id],
+      };
 
     /** Prefix of `resolvedCommitted` handed to the current segment's streamer. */
     let lastAppended = "";
@@ -6211,6 +6231,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
      * text (see `withSegmentPrefix`) rather than sent on its own.
      */
     const startNextSegment = async (sent: string): Promise<void> => {
+      finalizeSegmentMessage();
       segment.streamer = createStreamer();
       segment.startedAt = undefined;
       segment.flushNextAppend = true;
@@ -6444,7 +6465,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
         messageId: fallback.message?.id,
       });
       await this.endTyping(threadId, options?.sessionStatus ?? "active");
-      return fallback.message;
+      return toStreamResult(fallback.message);
     }
 
     // Caller blocks (StreamingPlan endWith) first, then the configured
@@ -6481,7 +6502,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
           messageId: fallback.message?.id,
         });
         await this.endTyping(threadId, options?.sessionStatus ?? "active");
-        return fallback.message;
+        return toStreamResult(fallback.message);
       }
       if (!isStreamExpired(error)) {
         throw error;
@@ -6506,7 +6527,11 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
           }
         );
         await this.endTyping(threadId, options?.sessionStatus ?? "active");
-        return { id: expiredTs, threadId, raw: { ts: expiredTs } };
+        return toStreamResult({
+          id: expiredTs,
+          threadId,
+          raw: { ts: expiredTs },
+        });
       }
       this.logger.warn(
         "Slack: stream expired before stop, delivering the rest in a new message",
@@ -6527,11 +6552,11 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
       segments: rotations + 1,
     });
 
-    return {
+    return toStreamResult({
       id: messageTs,
       threadId,
       raw: result,
-    };
+    });
   }
 
   /**

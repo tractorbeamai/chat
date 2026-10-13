@@ -12192,7 +12192,31 @@ describe("native stream rotation", () => {
         token: TOKEN,
       });
       expect(segments[1].stop).toHaveBeenCalledWith({ token: TOKEN });
-      expect(result).toMatchObject({ id: "1234567890.1" });
+      expect(result).toMatchObject({
+        id: "1234567890.1",
+        messageIds: ["1234567890.0", "1234567890.1"],
+      });
+    });
+  });
+
+  it("returns the message IDs of every segment in order", async () => {
+    await withClock(async (tick) => {
+      const { adapter, chatStream } = setup();
+      async function* stream() {
+        yield "first\n";
+        tick(MAX_AGE + 1);
+        yield "second\n\nthird\n";
+        tick(2 * MAX_AGE + 2);
+        yield "fourth\n\nfifth\n";
+      }
+
+      const result = await adapter.stream(THREAD, stream());
+
+      expect(chatStream).toHaveBeenCalledTimes(3);
+      expect(result).toMatchObject({
+        id: "1234567890.2",
+        messageIds: ["1234567890.0", "1234567890.1", "1234567890.2"],
+      });
     });
   });
 
@@ -12237,7 +12261,10 @@ describe("native stream rotation", () => {
       expect(chatStream).toHaveBeenCalledTimes(1);
       expect(segments[0].stop).toHaveBeenCalledTimes(1);
       expect(segments[0].stop).toHaveBeenCalledWith({ token: TOKEN });
-      expect(result).toMatchObject({ id: "1234567890.0" });
+      expect(result).toMatchObject({
+        id: "1234567890.0",
+        messageIds: ["1234567890.0"],
+      });
     });
   });
 
@@ -12306,7 +12333,10 @@ describe("native stream rotation", () => {
         token: TOKEN,
         chunks: [],
       });
-      expect(result).toMatchObject({ id: "1234567890.1" });
+      expect(result).toMatchObject({
+        id: "1234567890.1",
+        messageIds: ["1234567890.0", "1234567890.1"],
+      });
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining("expired before rotation"),
         expect.anything()
@@ -12332,7 +12362,10 @@ describe("native stream rotation", () => {
       token: TOKEN,
       markdown_text: "second\n",
     });
-    expect(result).toMatchObject({ id: "1234567890.1" });
+    expect(result).toMatchObject({
+      id: "1234567890.1",
+      messageIds: ["1234567890.0", "1234567890.1"],
+    });
   });
 
   it("returns the finalized message when the last segment expired with everything delivered", async () => {
@@ -12348,7 +12381,10 @@ describe("native stream rotation", () => {
 
     // No empty message is posted just to carry the feedback buttons.
     expect(chatStream).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ id: "1234567890.0" });
+    expect(result).toMatchObject({
+      id: "1234567890.0",
+      messageIds: ["1234567890.0"],
+    });
     expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.stringContaining("stream-end blocks skipped"),
       expect.objectContaining({ skippedBlocks: 1 })
@@ -12662,7 +12698,10 @@ describe("native streaming fallback", () => {
 
     expect(postSpy).toHaveBeenCalledTimes(1);
     expect(stop).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ id: "fallback-ts" });
+    expect(result).toMatchObject({
+      id: "fallback-ts",
+      messageIds: ["fallback-ts"],
+    });
     // Whatever the throttle did mid-stream, the final forced flush must have
     // delivered the full text — via the initial post or a closing edit.
     const lastPosted = editSpy.mock.calls.length
