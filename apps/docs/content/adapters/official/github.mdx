@@ -105,6 +105,8 @@ We recommend a GitHub App. It has better rate limits and security than a persona
 
 #### Single-tenant configuration
 
+Set `installationId` to accept events only from that GitHub App installation. After webhook verification, non-ping deliveries with a missing or different installation ID receive a `404` response without dispatching handlers. This check also applies when you configure a custom `webhookVerifier`.
+
 ```typescript
 createGitHubAdapter({
   appId: process.env.GITHUB_APP_ID!,

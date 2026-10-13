@@ -162,6 +162,8 @@ Better rate limits, security, and supports multiple installations.
 
 **Single-tenant:**
 
+Set `installationId` to accept events only from that GitHub App installation. After webhook verification, non-ping deliveries with a missing or different installation ID receive a `404` response without dispatching handlers. This check also applies when you configure a custom `webhookVerifier`.
+
 ```typescript
 createGitHubAdapter({
   appId: process.env.GITHUB_APP_ID!,
